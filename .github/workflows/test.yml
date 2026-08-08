@@ -1,0 +1,35 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Only the checkout needs the repo, and nothing here writes to it.
+permissions:
+  contents: read
+
+# A new push supersedes whatever the previous one was still running.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 0.10 is the minimum the plugin claims; nightly catches API drift early.
+        version: [v0.10.0, stable, nightly]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.version }}
+
+      # The suite only uses parsers Neovim ships with, so there is nothing to install.
+      - run: make test

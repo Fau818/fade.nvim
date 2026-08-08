@@ -1,0 +1,251 @@
+*fade.txt*                            Faded text that keeps its syntax colors
+
+==============================================================================
+CONTENTS                                                       *fade-contents*
+
+  1. Introduction ........................................ |fade-introduction|
+  2. Requirements ........................................ |fade-requirements|
+  3. Setup ...................................................... |fade-setup|
+  4. Configuration ............................................. |fade-config|
+  5. Commands ................................................ |fade-commands|
+  6. Lua API ...................................................... |fade-api|
+  7. How it works ........................................ |fade-how-it-works|
+  8. Limitations .......................................... |fade-limitations|
+
+==============================================================================
+1. INTRODUCTION                                            *fade-introduction*
+
+Two things in a buffer are not really code you are writing: the parts the
+language server says are dead, and the completion preview you have not
+accepted. Both are usually drawn in one flat gray, which throws away
+everything the highlighting was telling you.
+
+fade.nvim mixes each token's own color toward the background instead, so a
+faded keyword, string and number still read as a keyword, a string and a
+number. Only `fg` is set, so bold and italic still come from whatever drew the
+text underneath.
+
+Two features, each independent:
+
+  unused    Fades code carrying the LSP `unnecessary` tag, and hides its
+            squiggle, sign and virtual text.
+  ghost     Syntax-colors the inline completion preview from copilot.lua and
+            blink.cmp.
+
+==============================================================================
+2. REQUIREMENTS                                            *fade-requirements*
+
+- Neovim 0.10 or newer, for the `unnecessary` diagnostic tag. Tested on 0.12.
+- A treesitter parser for the languages you want colored. Without one, text
+  falls back to a flat |hl-DiagnosticUnnecessary|.
+- For `ghost`: copilot.lua or blink.cmp.
+
+==============================================================================
+3. SETUP                                                          *fade-setup*
+
+>lua
+    require("fade").setup()
+<
+With lazy.nvim -- `unused` needs a server, `ghost` needs insert mode: >lua
+    {
+      "Fau818/fade.nvim",
+      event = { "LspAttach", "InsertEnter" },
+      opts = {},
+
+      dependencies = {
+        { "zbirenbaum/copilot.lua", optional = true },
+        { "Saghen/blink.cmp", optional = true },
+      },
+    }
+<
+`optional` means lazy.nvim pulls a provider in only if your config asks for it
+elsewhere, so neither is installed on your behalf. The block can be dropped:
+the hook goes in whenever the provider loads, in any order.
+
+==============================================================================
+4. CONFIGURATION                                                 *fade-config*
+
+Defaults: >lua
+  require("fade").setup({
+    unused = {
+      enabled      = true,
+      alpha        = 0.75,
+      min_contrast = 3.0,
+      ignore       = {},
+      priority     = 200,
+      hide         = { underline = true, virtual_text = true, signs = true },
+      patterns     = {},
+      exclude      = {},
+    },
+    ghost = {
+      enabled      = true,
+      alpha        = 0.65,
+      min_contrast = 3.0,
+      ignore       = { "@comment" },
+      providers    = { copilot = true, blink = true },
+    },
+  })
+<
+                                                           *fade-config-alpha*
+alpha ~
+    Share of the original color kept; the rest fades into the `Normal`
+    background. Lower fades further. Suggestions default lower than real code
+    because they should sit further back.
+
+                                                    *fade-config-min_contrast*
+min_contrast ~
+    The floor that keeps faded text readable, as a WCAG contrast ratio against
+    the background: 1 is invisible, 21 is black on white.
+
+    Fading takes a share of the color, but legibility is not a share of
+    anything: the alpha that leaves a keyword readable can push an
+    already-quiet group into the background entirely, which is what a
+    suggestion inside a comment block runs into. So the result is measured,
+    and anything landing below the floor keeps its own color -- skipped,
+    never reversed, so faded text is never made louder than the real text
+    beside it.
+
+    The default 3.0 is WCAG's threshold for large text and non-text UI. The
+    4.5 for body text is deliberately not the target: a floor that high
+    un-fades most of a palette. Set to 0 to fade unconditionally.
+
+                                                          *fade-config-ignore*
+ignore ~
+    Capture groups never faded, whatever the contrast works out to. Matched by
+    prefix, so "@comment" also covers `@comment.documentation.python`.
+
+    It answers a different question from the floor: |fade-config-min_contrast|
+    asks whether text is still legible, `ignore` asks whether it should fade
+    at all.
+
+    `ghost` ignores comments by default. At the default alpha the two agree --
+    a comment fading to 2.67 is already under 3.0 -- but that agreement
+    belongs to the default. Raise |fade-config-alpha| to 0.75 and the same
+    comment clears the floor at 3.13, so the floor stops holding it back while
+    `ignore` still does.
+
+    `unused` ignores nothing: dead code's comments are dead too.
+
+                                                        *fade-config-priority*
+priority ~
+    Extmark priority for `unused`. Must outrank treesitter (100), semantic
+    tokens (128) and diagnostics (150), or the fading is painted over.
+
+                                                            *fade-config-hide*
+hide ~
+    Diagnostic handlers that should skip unused diagnostics. They remain in
+    |vim.diagnostic.get()|, the float and the location list; you only stop
+    getting a squiggle under code that is merely unused.
+
+    Note the `underline` handler is also where Neovim applies its own flat
+    `DiagnosticUnnecessary`, so hiding it is what hands the fading over to
+    this plugin.
+
+                                                        *fade-config-patterns*
+patterns ~
+    Lua patterns matched against a diagnostic message, for servers that report
+    unused code without sending the `unnecessary` tag.
+
+                                                         *fade-config-exclude*
+exclude ~
+    Filetypes to leave alone, e.g. `{ markdown = true }`.
+
+                                                       *fade-config-providers*
+providers ~
+    Which completion plugins `ghost` wraps. A provider set to false is never
+    touched.
+
+==============================================================================
+5. COMMANDS                                                    *fade-commands*
+
+                                                                       *:Fade*
+:Fade {action} [feature]
+    {action} is `enable`, `disable`, `toggle` or `demo`. [feature] is `unused`
+    or `ghost`; both when omitted. >vim
+        :Fade toggle
+        :Fade toggle ghost
+        :Fade demo
+<
+                                                                   *fade-demo*
+    `demo` draws a sample inline suggestion at the cursor. It writes nothing
+    to the buffer and clears itself on the next cursor move. Toggle and run it
+    again to compare against the flat original. The sample is Python.
+
+                                                           *:checkhealth-fade*
+:checkhealth fade
+    Reports whether each feature is on, whether the provider hooks are in
+    place, and whether this buffer's language has a parser. Both features can
+    fail silently -- the only symptom is text that is simply not faded -- so
+    this says which.
+
+==============================================================================
+6. LUA API                                                          *fade-api*
+
+require("fade").setup({opts})                                   *fade.setup()*
+require("fade").enable({feature})                              *fade.enable()*
+require("fade").disable({feature})                            *fade.disable()*
+require("fade").toggle({feature})                              *fade.toggle()*
+    {feature} is `"unused"`, `"ghost"`, or nil for both.
+
+require("fade").demo()                                           *fade.demo()*
+    As |:Fade| demo.
+
+require("fade.ghost").recolor({buf}, {ns}, {id}, {hint}, {symbol})
+                                                        *fade.ghost.recolor()*
+    Rewrite a ghost-text extmark in place, keeping its id. Public so a
+    provider this plugin does not know about can be wired up by hand: call it
+    from a wrapper on that provider's draw function.
+
+    {hint} is a capture group for the completed symbol, usually from
+    `require("fade.ghost").kind_group(item.kind)`. {symbol} is the text the
+    completion inserts, used to locate that symbol among the chunks.
+
+==============================================================================
+7. HOW IT WORKS                                            *fade-how-it-works*
+
+Neovim already fades unused code: the diagnostic `underline` handler applies
+`DiagnosticUnnecessary` at priority 150, above treesitter (100) and semantic
+tokens (128). What it cannot do is keep each token's own color, because one
+extmark carries one highlight group.
+
+So `unused` walks the treesitter captures inside the unused ranges -- which
+are few and short -- and sets one `fg`-only extmark per token at priority 200.
+That happens on |DiagnosticChanged| rather than on every redraw, so there is
+no per-frame cost and no decoration provider.
+
+Ghost text is harder, because treesitter never highlights virtual text:
+`virt_text` is not buffer content, so there are no captures to find. But a
+chunk's highlight may be a list, and it merges per field -- `{ "@keyword.lua",
+faded }` takes the color from the faded group and the italic from the real
+capture. So the suggestion is parsed on its own with |get_string_parser()|,
+captures are mapped onto chunk boundaries, and the provider's extmark is
+rewritten by id from inside a wrapper on its draw function, in the same frame,
+so the flat color never appears.
+
+Two details that are easy to get wrong:
+
+- A suggestion is a fragment. Parsed alone, a trailing `")` is one
+  unterminated string that swallows the bracket. Parsing
+  `line_prefix .. suggestion` and dropping the prefix fixes the captures.
+- A lone identifier is `@variable` whatever it really is; nothing in
+  `unregister_task` says function. The completion item's kind does, so it
+  names the group for the completed symbol. That symbol is found by matching
+  the inserted text rather than assuming it comes first: an auto-import makes
+  the server send a qualified `os.pread`, and the tail is what gets shown.
+
+==============================================================================
+8. LIMITATIONS                                              *fade-limitations*
+
+- `ghost` monkeypatches `copilot.suggestion.update_preview` and blink's
+  `ghost_text.draw_preview`. Both calls are pcall'd, so a rename upstream
+  means ghost text quietly reverts to its plain color rather than breaking --
+  but the effect can disappear after a provider update. |:checkhealth-fade|
+  reports whether the hooks are in place.
+- blink recomputes its preview on every keystroke in insert mode. Results are
+  cached per (language, prefix, text), but a long suggestion still costs one
+  parse the first time.
+- A single-identifier completion has exactly one token, so there is nothing
+  multi-colored to show. The effect is visible on snippets, calls with
+  arguments, and Copilot's multi-line suggestions.
+
+vim:tw=78:ts=8:noet:ft=help:norl:
