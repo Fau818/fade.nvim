@@ -4,7 +4,7 @@
 
 Faded text that keeps its syntax colors.
 
-![fade.nvim: faded text keeping its syntax colors](assets/demo.svg)
+![Unreachable code faded, its keyword, call, number and string still distinct](assets/unused.png)
 
 Two things in your buffer aren't really code you're writing: the parts the language server says are
 dead, and the completion preview you haven't accepted. Both are usually rendered in one flat gray,
