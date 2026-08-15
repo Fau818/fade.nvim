@@ -28,11 +28,7 @@ end
 ---@param name string?
 local function dispatch(action, name)
   for _, feature in ipairs(resolve(name)) do
-    if action == "demo" then
-      if feature.demo then feature.demo() end
-    else
-      feature[action]()
-    end
+    feature[action]()
   end
 end
 
@@ -50,8 +46,8 @@ function M.setup(config)
 
   vim.api.nvim_create_user_command("Fade", function(args)
     local action, name = args.fargs[1], args.fargs[2]
-    if not vim.tbl_contains({ "enable", "disable", "toggle", "demo" }, action) then
-      return vim.notify("Fade: expected enable, disable, toggle or demo", vim.log.levels.ERROR)
+    if not vim.tbl_contains({ "enable", "disable", "toggle" }, action) then
+      return vim.notify("Fade: expected enable, disable or toggle", vim.log.levels.ERROR)
     end
     if name and not features[name] then
       return vim.notify("Fade: no feature named " .. name, vim.log.levels.ERROR)
@@ -59,10 +55,10 @@ function M.setup(config)
     dispatch(action, name)
   end, {
     nargs = "+",
-    desc = "Turn fading on or off, or draw a sample suggestion",
+    desc = "Turn fading on or off",
     complete = function(_, line)
       local done = #vim.split(vim.trim(line), "%s+")
-      if done <= 2 then return { "enable", "disable", "toggle", "demo" } end
+      if done <= 2 then return { "enable", "disable", "toggle" } end
       return vim.tbl_keys(features)
     end,
   })
@@ -79,11 +75,6 @@ function M.disable(name) dispatch("disable", name) end
 
 ---@param name string? Only this feature, or both when omitted.
 function M.toggle(name) dispatch("toggle", name) end
-
-
----Draw a sample inline suggestion at the cursor. Colors follow the current setting, so toggling
----and re-running shows the flat original against the per-token version.
-function M.demo() features.ghost.demo() end
 
 
 M.unused = features.unused

@@ -118,11 +118,10 @@ ignore ~
     asks whether text is still legible, `ignore` asks whether it should fade
     at all.
 
-    `ghost` ignores comments by default. At the default alpha the two agree --
-    a comment fading to 2.67 is already under 3.0 -- but that agreement
-    belongs to the default. Raise |fade-config-alpha| to 0.75 and the same
-    comment clears the floor at 3.13, so the floor stops holding it back while
-    `ignore` still does.
+    `ghost` ignores comments by default. The two usually overlap, but only
+    because most comment colors are already quiet enough to land under the
+    floor -- a brighter one, or a higher |fade-config-alpha|, clears it while
+    `ignore` still holds.
 
     `unused` ignores nothing: dead code's comments are dead too.
 
@@ -160,17 +159,11 @@ providers ~
 
                                                                        *:Fade*
 :Fade {action} [feature]
-    {action} is `enable`, `disable`, `toggle` or `demo`. [feature] is `unused`
+    {action} is `enable`, `disable` or `toggle`. [feature] is `unused`
     or `ghost`; both when omitted. >vim
         :Fade toggle
         :Fade toggle ghost
-        :Fade demo
 <
-                                                                   *fade-demo*
-    `demo` draws a sample inline suggestion at the cursor. It writes nothing
-    to the buffer and clears itself on the next cursor move. Toggle and run it
-    again to compare against the flat original. The sample is Python.
-
                                                            *:checkhealth-fade*
 :checkhealth fade
     Reports whether each feature is on, whether the provider hooks are in
@@ -186,9 +179,6 @@ require("fade").enable({feature})                              *fade.enable()*
 require("fade").disable({feature})                            *fade.disable()*
 require("fade").toggle({feature})                              *fade.toggle()*
     {feature} is `"unused"`, `"ghost"`, or nil for both.
-
-require("fade").demo()                                           *fade.demo()*
-    As |:Fade| demo.
 
 require("fade.ghost").recolor({buf}, {ns}, {id}, {hint}, {symbol})
                                                         *fade.ghost.recolor()*
@@ -241,11 +231,8 @@ Two details that are easy to get wrong:
   means ghost text quietly reverts to its plain color rather than breaking --
   but the effect can disappear after a provider update. |:checkhealth-fade|
   reports whether the hooks are in place.
-- blink recomputes its preview on every keystroke in insert mode. Results are
-  cached per (language, prefix, text), but a long suggestion still costs one
-  parse the first time.
-- A single-identifier completion has exactly one token, so there is nothing
-  multi-colored to show. The effect is visible on snippets, calls with
-  arguments, and Copilot's multi-line suggestions.
+- Coloring a suggestion costs one treesitter parse. Results are cached per
+  (language, prefix, text), so a long suggestion redrawn while you type misses
+  the cache on every keystroke -- the prefix changes with each character.
 
 vim:tw=78:ts=8:noet:ft=help:norl:
