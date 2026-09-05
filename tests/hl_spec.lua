@@ -63,8 +63,9 @@ return {
   { "a group above the floor fades normally", function()
     h.palette()
     vim.api.nvim_set_hl(0, "FadeTestBright", { fg = 0xc3e88d })
-    local group = hl.faded("FadeTestBright", 0.65, 3.0)
-    local faded = vim.api.nvim_get_hl(0, { name = group }).fg
+    local group = assert(hl.faded("FadeTestBright", 0.65, 3.0))
+    -- `assert`: a group with no faded twin at all is its own failure, and not the one being tested.
+    local faded = assert(vim.api.nvim_get_hl(0, { name = group }).fg)
 
     h.truthy(faded ~= 0xc3e88d, "a bright color has room to fade")
     h.truthy(hl.contrast(faded, hl.background()) >= 3.0, "and still clears the floor")

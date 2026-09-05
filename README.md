@@ -4,7 +4,7 @@
 
 Faded text that keeps its syntax colors.
 
-![Unreachable code faded, its keyword, call, number and string still distinct](assets/unused.png)
+![Unreachable code faded, its keyword, call, number and string still distinct](assets/example.png)
 
 Dead code and unaccepted completion previews are usually drawn in one flat gray, which throws away
 everything the highlighting was telling you. **fade.nvim** mixes each token's own color toward the
@@ -20,8 +20,10 @@ The two are independent — turn one off and nothing of it is installed.
 
 ## Requirements
 
-- Neovim **0.10+** for the `unnecessary` diagnostic tag, tested on 0.12
-- A treesitter parser for the languages you want colored; without one, text falls back to a flat gray
+- Neovim **0.11+**, since `unused` finds semantic tokens by namespace name and 0.11 is where
+  those names changed; tested on 0.12
+- A treesitter parser for the languages you want colored. `unused` reads the server's semantic
+  tokens too, so a buffer with no parser can still get color; with neither, text goes flat gray
 - `ghost` needs [copilot.lua](https://github.com/zbirenbaum/copilot.lua) or
   [blink.cmp](https://github.com/Saghen/blink.cmp)
 
@@ -68,7 +70,7 @@ require("fade").setup({
 ```
 
 - **`alpha`** — how much color survives. `0.75` keeps 75% of the token's own color and mixes the rest
-  into the background. Ghost text defaults lower, so it sits behind your real code.
+  into the background.
 - **`min_contrast`** — a floor, so nothing fades to unreadable. Quiet colors have less room than
   bright ones, so a color landing below this ratio keeps its original instead. `0` turns it off.
 - **`ignore`** — capture groups that never fade, whatever the floor says.
@@ -91,16 +93,24 @@ Also available as `require("fade").toggle()`, `.enable()`, `.disable()`.
 ## How it works
 
 One extmark carries one highlight group, which is why Neovim's own `DiagnosticUnnecessary` has to
-flatten everything it covers. `unused` instead walks the treesitter captures inside each unused range
-and sets one `fg`-only extmark per token. `ghost` has no captures to walk — virtual text is not
-buffer content — so it parses the suggestion separately and rewrites the provider's extmark in the
-same frame, before the flat color can appear. Full write-up in `:h fade-how-it-works`.
+flatten everything it covers. `unused` instead works out the color each position inside an unused range
+is actually drawn in — treesitter, then any semantic tokens above it — and sets one `fg`-only extmark
+per run of that color. `ghost` has no captures to walk — virtual text is not buffer content — so it
+parses the suggestion back inside the buffer text it would land in, and rewrites the provider's
+extmark in the same frame, before the flat color can appear. Full write-up in
+`:h fade-how-it-works`.
 
 ## Limitations
 
+- `unused` costs what is flagged, not what the file holds.
 - `ghost` monkeypatches copilot's and blink's draw functions. Both calls are wrapped in `pcall`, so
   an upstream rename means ghost text quietly loses the effect rather than breaking.
   `:checkhealth fade` reports whether the hooks are still in place.
+- `ghost`'s hooks stay for the session: disabling it stops the recoloring, but `:checkhealth fade`
+  still reports the provider as hooked.
+- `ghost` fades treesitter's color, which can differ from the color the token gets once you accept
+  it: a language server's semantic tokens draw above treesitter, and virtual text has none to read.
+  `:h fade-limitations` has the details.
 
 ## Tests
 
@@ -109,14 +119,14 @@ make test               # everything
 make test SPEC=ghost    # one spec file
 ```
 
-Runs under `nvim -l` on a stock Neovim with no dependencies; CI covers 0.10, stable and nightly.
-For a manual check, open `demo/unused.py` with an LSP attached.
+Runs under `nvim -l` on a stock Neovim with no dependencies; CI covers 0.11, stable and nightly.
+For a manual check, open `demo/dead_code.py` with an LSP attached.
 
 ## Credits
 
 The `unused` feature covers the same ground as
 [neodim](https://github.com/zbirenbaum/neodim), which came first and is where the idea of blending
-towards the background rather than flattening to gray comes from.
+toward the background rather than flattening to gray comes from.
 
 Built with [Claude Code](https://claude.com/claude-code) (Claude Opus 5), which wrote the
 implementation and these docs.

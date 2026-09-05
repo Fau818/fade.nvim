@@ -5,10 +5,6 @@
 ---language server calls dead; `ghost` applies it to inline completion previews.
 local M = {}
 
----@class fade.Config
----@field unused? fade.UnusedConfig
----@field ghost? fade.GhostConfig
-
 ---@type table<string, table>
 local features = {
   unused = require("fade.unused"),
@@ -17,25 +13,33 @@ local features = {
 
 
 ---@param name string?
----@return table[] chosen
+---@return table[]? chosen nil when `name` names no feature.
 local function resolve(name)
-  if name and features[name] then return { features[name] } end
-  return { features.unused, features.ghost }
+  if not name then return { features.unused, features.ghost } end
+  local feature = features[name]
+  return feature and { feature }
 end
 
 
 ---@param action string
 ---@param name string?
 local function dispatch(action, name)
-  for _, feature in ipairs(resolve(name)) do
-    feature[action]()
+  local chosen = resolve(name)
+  if not chosen then
+    return vim.notify("Fade: no feature named " .. name, vim.log.levels.ERROR, { title = "fade.nvim" })
   end
+
+  for _, feature in ipairs(chosen) do feature[action]() end
 end
 
 
 -- ════════════════════════════════════════════════════════════
 -- ══════════════════════════ Setup ═══════════════════════════
 -- ════════════════════════════════════════════════════════════
+
+---@class fade.Config
+---@field unused? fade.UnusedConfig
+---@field ghost? fade.GhostConfig
 
 ---@param config? fade.Config
 function M.setup(config)
@@ -47,19 +51,24 @@ function M.setup(config)
   vim.api.nvim_create_user_command("Fade", function(args)
     local action, name = args.fargs[1], args.fargs[2]
     if not vim.tbl_contains({ "enable", "disable", "toggle" }, action) then
-      return vim.notify("Fade: expected enable, disable or toggle", vim.log.levels.ERROR)
+      return vim.notify("Fade: expected enable, disable or toggle", vim.log.levels.ERROR, { title = "fade.nvim" })
     end
-    if name and not features[name] then
-      return vim.notify("Fade: no feature named " .. name, vim.log.levels.ERROR)
+    -- `nargs` has no "one or two", so the extras are turned away here rather than ignored.
+    if #args.fargs > 2 then
+      return vim.notify("Fade: expected at most one feature name", vim.log.levels.ERROR, { title = "fade.nvim" })
     end
     dispatch(action, name)
   end, {
     nargs = "+",
     desc = "Turn fading on or off",
-    complete = function(_, line)
-      local done = #vim.split(vim.trim(line), "%s+")
-      if done <= 2 then return { "enable", "disable", "toggle" } end
-      return vim.tbl_keys(features)
+    complete = function(arg_lead, line, pos)
+      local args = line:sub(1, pos):match("Fade%s+(.*)$") or ""
+      local slot = #vim.split(args, "%s+", { trimempty = true }) + ((args == "" or args:match("%s$")) and 1 or 0)
+
+      local candidates = { "enable", "disable", "toggle" }
+      if slot > 1 then candidates = vim.tbl_keys(features) table.sort(candidates) end
+
+      return vim.tbl_filter(function(c) return vim.startswith(c, arg_lead) end, candidates)
     end,
   })
 end

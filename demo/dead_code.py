@@ -7,6 +7,7 @@ colors -- a faded keyword, string and number should still differ from each other
 rather than all collapsing to one gray.
 """
 
+
 # ─── Imports ────────────────────────────────────────────────
 
 import json.decoder  # DIM  dotted: both `json` and `decoder` fade, as separate tokens
@@ -16,9 +17,8 @@ from collections import OrderedDict  # KEEP  used below
 from pathlib import Path  # DIM  `Path` only
 from typing import Any as Anything  # DIM  the alias `Anything`, not `Any`
 
+
 # ─── Locals ─────────────────────────────────────────────────
-
-
 def locals_demo(width, height):
     """Both basedpyright and ruff flag `area`; it must get ONE extmark, not two."""
     area = width * height  # DIM  `area` fades, `width * height` stays bright
@@ -33,10 +33,13 @@ def partial_line():
 
 
 # ─── Unreachable Code ───────────────────────────────────────
-
-
 def unreachable_demo(flag):
     """The clearest per-token test: a whole faded block that keeps its syntax colors."""
+    total = 0
+    for index in range(10):
+        total += index * 2
+    print(f"unreachable {total}")
+
     if flag:
         return "early"
     return "late"
@@ -51,8 +54,6 @@ def unreachable_demo(flag):
 
 
 # ─── Unused Definitions ─────────────────────────────────────
-
-
 def _unused_helper(value):  # DIM  `_unused_helper` -- private and never called
     return value * 2
 
@@ -75,8 +76,6 @@ class UsedClass:  # KEEP  instantiated below
 
 
 # ─── Live Code (all KEEP) ───────────────────────────────────
-
-
 def main():
     holder = UsedClass()
     holder.store("alpha", 1)

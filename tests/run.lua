@@ -4,7 +4,7 @@ local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
 vim.opt.runtimepath:prepend(root)
 package.path = ("%s/tests/?.lua;%s"):format(root, package.path)
 
-local specs = #_G.arg > 0 and _G.arg or { "hl", "ghost", "unused", "health" }
+local specs = #_G.arg > 0 and _G.arg or { "hl", "ghost", "unused", "health", "init" }
 
 require("fade").setup()
 

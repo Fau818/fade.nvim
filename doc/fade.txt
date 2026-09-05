@@ -35,9 +35,12 @@ Two features, each independent:
 ==============================================================================
 2. REQUIREMENTS                                            *fade-requirements*
 
-- Neovim 0.10 or newer, for the `unnecessary` diagnostic tag. Tested on 0.12.
-- A treesitter parser for the languages you want colored. Without one, text
-  falls back to a flat |hl-DiagnosticUnnecessary|.
+- Neovim 0.11 or newer, since `unused` finds |lsp-semantic_tokens| by
+  namespace name and 0.11 is where those names changed. Tested on 0.12.
+- A treesitter parser for the languages you want colored. `unused` also reads
+  the server's |lsp-semantic_tokens|, so a buffer with no parser can still be
+  colored; only where neither layer claims a position does text fall back to a
+  flat |hl-DiagnosticUnnecessary|. `ghost` has treesitter only.
 - For `ghost`: copilot.lua or blink.cmp.
 
 ==============================================================================
@@ -89,8 +92,7 @@ Defaults: >lua
                                                            *fade-config-alpha*
 alpha ~
     Share of the original color kept; the rest fades into the `Normal`
-    background. Lower fades further. Suggestions default lower than real code
-    because they should sit further back.
+    background. Lower fades further.
 
                                                     *fade-config-min_contrast*
 min_contrast ~
@@ -98,12 +100,10 @@ min_contrast ~
     the background: 1 is invisible, 21 is black on white.
 
     Fading takes a share of the color, but legibility is not a share of
-    anything: the alpha that leaves a keyword readable can push an
-    already-quiet group into the background entirely, which is what a
-    suggestion inside a comment block runs into. So the result is measured,
-    and anything landing below the floor keeps its own color -- skipped,
-    never reversed, so faded text is never made louder than the real text
-    beside it.
+    anything: the alpha that leaves a keyword readable can sink an
+    already-quiet group into the background, as it does inside a comment. So
+    a color landing below the floor keeps its own instead -- skipped, never
+    reversed, so faded text is never louder than the code beside it.
 
     The default 3.0 is WCAG's threshold for large text and non-text UI. The
     4.5 for body text is deliberately not the target: a floor that high
@@ -114,14 +114,12 @@ ignore ~
     Capture groups never faded, whatever the contrast works out to. Matched by
     prefix, so "@comment" also covers `@comment.documentation.python`.
 
-    It answers a different question from the floor: |fade-config-min_contrast|
-    asks whether text is still legible, `ignore` asks whether it should fade
-    at all.
-
-    `ghost` ignores comments by default. The two usually overlap, but only
-    because most comment colors are already quiet enough to land under the
-    floor -- a brighter one, or a higher |fade-config-alpha|, clears it while
-    `ignore` still holds.
+    A different question from the floor: |fade-config-min_contrast| asks
+    whether text is still legible, `ignore` asks whether it should fade at
+    all. They usually agree on the comments `ghost` ignores by default, since
+    most comment colors are quiet enough to land under the floor -- but a
+    brighter one, or a higher |fade-config-alpha|, clears it while `ignore`
+    still holds.
 
     `unused` ignores nothing: dead code's comments are dead too.
 
@@ -139,6 +137,10 @@ hide ~
     Note the `underline` handler is also where Neovim applies its own flat
     `DiagnosticUnnecessary`, so hiding it is what hands the fading over to
     this plugin.
+
+    Hiding only lasts while `unused` is on. Turn it off and the handlers draw
+    these diagnostics again, so you fall back to Neovim's own marking rather
+    than to nothing at all.
 
                                                         *fade-config-patterns*
 patterns ~
@@ -167,9 +169,10 @@ providers ~
                                                            *:checkhealth-fade*
 :checkhealth fade
     Reports whether each feature is on, whether the provider hooks are in
-    place, and whether this buffer's language has a parser. Both features can
-    fail silently -- the only symptom is text that is simply not faded -- so
-    this says which.
+    place, and which color sources this buffer has -- a treesitter parser, a
+    server's |lsp-semantic_tokens|, or neither. Both features can fail
+    silently -- the only symptom is text that is simply not faded -- so this
+    says which.
 
 ==============================================================================
 6. LUA API                                                          *fade-api*
@@ -180,15 +183,16 @@ require("fade").disable({feature})                            *fade.disable()*
 require("fade").toggle({feature})                              *fade.toggle()*
     {feature} is `"unused"`, `"ghost"`, or nil for both.
 
-require("fade.ghost").recolor({buf}, {ns}, {id}, {hint}, {symbol})
+require("fade.ghost").recolor({buf}, {ns}, {id}, {kind}, {inserted})
                                                         *fade.ghost.recolor()*
     Rewrite a ghost-text extmark in place, keeping its id. Public so a
     provider this plugin does not know about can be wired up by hand: call it
     from a wrapper on that provider's draw function.
 
-    {hint} is a capture group for the completed symbol, usually from
-    `require("fade.ghost").kind_group(item.kind)`. {symbol} is the text the
-    completion inserts, used to locate that symbol among the chunks.
+    {kind} is a capture for the completed symbol, usually from
+    `require("fade.ghost").kind_group(item.kind)`. {inserted} is the whole
+    text accepting the completion would insert -- typed prefix included --
+    which is what finds that symbol among the chunks.
 
 ==============================================================================
 7. HOW IT WORKS                                            *fade-how-it-works*
@@ -198,41 +202,74 @@ Neovim already fades unused code: the diagnostic `underline` handler applies
 tokens (128). What it cannot do is keep each token's own color, because one
 extmark carries one highlight group.
 
-So `unused` walks the treesitter captures inside the unused ranges -- which
-are few and short -- and sets one `fg`-only extmark per token at priority 200.
-That happens on |DiagnosticChanged| rather than on every redraw, so there is
-no per-frame cost and no decoration provider.
+So `unused` works out what each position inside an unused range is drawn in
+and sets one `fg`-only extmark per run of that color, at priority 200.
+Highlights stack and merge per field, so what a token shows is the topmost
+layer that defines an `fg`: treesitter at 100, then the server's
+|lsp-semantic_tokens| above it. Both are read, lowest first, and a group with
+no color of its own is skipped.
 
-Ghost text is harder, because treesitter never highlights virtual text:
-`virt_text` is not buffer content, so there are no captures to find. But a
-chunk's highlight may be a list, and it merges per field -- `{ "@keyword.lua",
-faded }` takes the color from the faded group and the italic from the real
-capture. So the suggestion is parsed on its own with |get_string_parser()|,
-captures are mapped onto chunk boundaries, and the provider's extmark is
-rewritten by id from inside a wrapper on its draw function, in the same frame,
-so the flat color never appears.
+That happens on |DiagnosticChanged| and |LspTokenUpdate| rather than on every
+redraw, so there is no per-frame cost and no decoration provider.
 
-Two details that are easy to get wrong:
+Ghost text is harder: `virt_text` is not buffer content, so treesitter never
+parses a suggestion and there are no captures to find. But a chunk's highlight
+may be a list, and it merges per field -- `{ "@keyword.lua", faded }` takes
+the color from the faded group and the italic from the real capture. So the
+suggestion is spliced back into the buffer text it would land in, that window
+is parsed with |get_string_parser()|, captures are mapped onto chunk
+boundaries, and the provider's extmark is rewritten by id from inside a
+wrapper on its draw function, in the same frame, so the flat color never
+appears.
 
-- A suggestion is a fragment. Parsed alone, a trailing `")` is one
-  unterminated string that swallows the bracket. Parsing
-  `line_prefix .. suggestion` and dropping the prefix fixes the captures.
-- A lone identifier is `@variable` whatever it really is; nothing in
-  `unregister_task` says function. The completion item's kind does, so it
-  names the group for the completed symbol. That symbol is found by matching
-  the inserted text rather than assuming it comes first: an auto-import makes
-  the server send a qualified `os.pread`, and the tail is what gets shown.
+Three things go into that parse:
+
+- Context. Alone, a trailing `")` is an unterminated string, and a line
+  inside a docstring is code. So the window is the top-level construct
+  holding the mark -- function, class or statement -- split at the mark, so
+  both sides are context and only the suggestion becomes chunks. Not the
+  file, which would make the parse grow with it, and capped even so, since it
+  is reparsed as you type: past 200 rows the climb stops at an inner
+  construct, past 32 KiB the mark's own line is used.
+- The completion's kind. A lone identifier is `@variable` whatever it really
+  is, so the kind names the group for the completed symbol -- unless
+  treesitter had something more specific to say, since `@variable.member`
+  means the grammar saw the dot. The symbol is found by matching the text the
+  completion inserts, not by assuming it comes first: an auto-import sends a
+  qualified `os.pread`, and the tail is what gets shown. This needs a
+  completion item: blink.cmp has one, copilot sends free text, so a copilot
+  suggestion goes by treesitter alone.
+- The language under the mark, not the file's. A suggestion inside a fenced
+  code block is parsed with that block's grammar, and its window taken from
+  that same layer, so it stops at the fence instead of running out into the
+  prose.
 
 ==============================================================================
 8. LIMITATIONS                                              *fade-limitations*
 
+- A large unreachable block costs a visible pause, since `unused` works per
+  position of dead code. It runs when the diagnostics land, so the pause sits
+  between the server answering and the fading appearing, never in a scroll.
 - `ghost` monkeypatches `copilot.suggestion.update_preview` and blink's
-  `ghost_text.draw_preview`. Both calls are pcall'd, so a rename upstream
-  means ghost text quietly reverts to its plain color rather than breaking --
-  but the effect can disappear after a provider update. |:checkhealth-fade|
-  reports whether the hooks are in place.
-- Coloring a suggestion costs one treesitter parse. Results are cached per
-  (language, prefix, text), so a long suggestion redrawn while you type misses
-  the cache on every keystroke -- the prefix changes with each character.
+  `ghost_text.draw_preview`, both pcall'd, so a rename upstream costs the
+  coloring and not the editor -- the effect can vanish after a provider
+  update with no other sign. |:checkhealth-fade| reports whether the hooks
+  are in place.
+- Those wrappers stay for the session: `disable` stops the recoloring but
+  leaves them in, since restoring the original would clobber whatever wrapped
+  on top of them -- so a disabled `ghost` still reports as hooked. A provider
+  loading while the feature is off is not wrapped at all.
+- Coloring a suggestion costs one treesitter parse of its window. A redraw
+  that leaves the extmark untouched is skipped; anything else parses again.
+  The caps that keep this inside a frame are why a suggestion deep in a very
+  large string or a very long function is colored with less context than one
+  anywhere else -- it reads as code, which is what every suggestion did
+  before there was a window.
+- `ghost` fades the color treesitter gives a token, which is not always the
+  color it gets once accepted: |lsp-semantic_tokens| draw above treesitter
+  and exist only for buffer text, so a suggestion has none to read. Python's
+  `range` is the usual example -- treesitter calls it `@function.builtin`,
+  the server calls it a class, and the two are different colors. The
+  completion's kind patches the completed symbol and nothing around it.
 
 vim:tw=78:ts=8:noet:ft=help:norl:
