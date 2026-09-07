@@ -1,0 +1,42 @@
+name: mirror
+
+# --mirror sends every ref whatever the trigger matched, so a filter here picks when a
+# sync happens, never what lands. Tags need their own line: pushing v0.1.0 touches no
+# branch, and the tag users install by would otherwise wait for the next push to main.
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  workflow_dispatch:
+
+# The clone is anonymous and the push authenticates as Gitee, so GITHUB_TOKEN is unused.
+permissions: {}
+
+# Each run sends the whole ref state, so the newest one alone is enough -- and two runs
+# racing for the same refs on the far end is the one way this gets stuck.
+concurrency:
+  group: mirror
+  cancel-in-progress: true
+
+jobs:
+  gitee:
+    # A fork has no token, and a red run on every push there is worse than no mirror.
+    if: github.repository == 'Fau818/fade.nvim'
+    runs-on: ubuntu-latest
+
+    # The two halves of the Gitee side, together, so there is one place to edit.
+    env:
+      GITEE_USER: Fau818
+      GITEE_REPO: Fau818/fade.nvim
+
+    steps:
+      # actions/checkout fetches the ref that was pushed, not every ref, so the clone is
+      # done by hand -- a mirror carrying only main would drop the tags releases hang off.
+      - run: git clone --mirror "https://github.com/${{ github.repository }}.git" repo.git
+
+      # One-way: a ref absent here is deleted there, so nothing may be committed on Gitee
+      # directly. Nothing echoes the URL, and Actions masks the token in the log regardless.
+      - run: git push --mirror "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/${GITEE_REPO}.git"
+        working-directory: repo.git
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_FADE_NVIM_TOKEN }}
